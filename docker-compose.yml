@@ -1,0 +1,63 @@
+version: "3.9"
+
+# ── Shared network ─────────────────────────────────────────────────────────────
+networks:
+  rag_net:
+    driver: bridge
+
+# ── Named volumes ──────────────────────────────────────────────────────────────
+volumes:
+  chroma_data:
+
+# ── Services ───────────────────────────────────────────────────────────────────
+services:
+
+  # ── ChromaDB (local vector store) ─────────────────────────────────────────
+  chromadb:
+    image: chromadb/chroma:1.0.0
+    container_name: rag_chromadb
+    restart: unless-stopped
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - rag_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── RAG Evaluation Platform API ───────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag_api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # ChromaDB runs in Docker — use the container hostname
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: "8000"
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8080"
+      # NEO4J_URI is read from .env (AuraDB cloud) — do NOT override here
+    ports:
+      - "8080:8080"
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    networks:
+      - rag_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
